@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101820">
+<meta name="description" content="قارئ ذكي يتابع القراءة والارتجال">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Labib Prompter AI</title>
+<style>
+:root{color-scheme:dark;--bg:#101820;--panel:#1b2a36;--muted:#aab8c5;--green:#176b45;--gold:#ffc857;--line:#344452}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:system-ui,"Noto Naskh Arabic",sans-serif}
+main{max-width:850px;margin:auto;padding:18px; padding-bottom:36px}
+header{text-align:center;padding:12px 0 18px}h1{font-size:23px;margin:0 0 5px;color:var(--gold)}header p{margin:0;color:var(--muted);font-size:13px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:14px;margin:12px 0}
+label{display:block;color:var(--muted);font-size:14px;margin-bottom:8px}
+textarea{width:100%;min-height:135px;background:#111c25;color:white;border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit;font-size:17px;resize:vertical}
+button,select{font:inherit;border:0;border-radius:10px;padding:11px 13px}
+button{background:#263b4b;color:white;font-weight:650;cursor:pointer}
+button.primary{background:#176b45}button.stop{background:#754238}
+button:disabled{opacity:.45}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row>*{flex:1}
+select{background:#111c25;color:white;border:1px solid var(--line);min-width:110px}
+#status{color:var(--gold);font-size:14px;text-align:center;min-height:24px}
+#reader{font-size:25px;line-height:2.05;white-space:pre-wrap;word-break:normal;min-height:160px}
+.done{background:var(--green);border-radius:4px;padding:1px 2px}
+.current{background:var(--gold);color:#101820;border-radius:4px;padding:1px 2px}
+#coach{color:#f4c66a;line-height:1.8}
+.small{font-size:12px;color:var(--muted);line-height:1.7}
+.stat{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}
+.pill{display:inline-block;background:#263b4b;padding:4px 9px;border-radius:99px;font-size:12px;color:#dbe7ef}
+@media(min-width:650px){main{padding:28px}#reader{font-size:30px}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>LABIB PROMPTER AI</h1><p>مساعد القراءة والإلقاء والارتجال</p></header>
+
+<section class="panel">
+<label for="source">1. الصق النص الذي تريد قراءته</label>
+<textarea id="source" placeholder="الصق نصك هنا..."></textarea>
+<div class="row" style="margin-top:10px">
+<button id="load" class="primary">تجهيز النص</button>
+<select id="lang" aria-label="لغة التعرف">
+<option value="ar-YE">العربية</option>
+<option value="en-US">English</option>
+<option value="ar-SA">العربية (السعودية)</option>
+</select>
+</div>
+</section>
+
+<section class="panel">
+<div class="row" style="justify-content:space-between">
+<span class="pill" id="mode">جاهز للقراءة</span>
+<span class="pill" id="support">فحص دعم الصوت...</span>
+</div>
+<div id="reader" style="margin-top:14px">سيظهر النص هنا بعد تجهيزه.</div>
+<div id="status" aria-live="polite">أدخل النص ثم اضغط «تجهيز النص».</div>
+<div class="row">
+<button id="start" class="primary">🎙 ابدأ الاستماع</button>
+<button id="stop" class="stop" disabled>إيقاف</button>
+<button id="reset">إعادة من البداية</button>
+</div>
+</section>
+
+<section class="panel">
+<strong>مساعد الارتجال</strong>
+<p id="coach">عندما تتحدث بكلمات لا تطابق النص، سأحافظ على موضعك وأحاول تحديد مكان العودة عند استئناف القراءة.</p>
+<div class="stat"><span>موضع القراءة</span><span id="progress">0 / 0</span></div>
+</section>
+<p class="small">تنبيه: هذه نسخة تجريبية. التعرف الصوتي في المتصفح قد يحتاج إلى الإنترنت وخدمة صوت مدعومة. اكتشاف الارتجال هنا أولي ويعتمد على مطابقة الكلمات، وليس فهماً دلالياً كاملاً. لا تُرسل النصوص إلى خادم هذا التطبيق في هذه النسخة.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let words=[], starts=[], last=-1, recognition=null, listening=false, restartTimer=null;
+const supported=('SpeechRecognition' in window)||('webkitSpeechRecognition' in window);
+$('support').textContent=supported?'التعرف الصوتي متاح مبدئياً':'التعرف الصوتي غير مدعوم هنا';
+function norm(s){
+ return s.normalize('NFD').replace(/[\u064B-\u065F\u0670]/g,'')
+ .replace(/[أإآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
+ .replace(/[^\p{L}\p{N}]/gu,'').toLocaleLowerCase();
+}
+function prepare(){
+ const text=$('source').value.trim();
+ if(!text){$('status').textContent='أدخل النص أولاً.';return}
+ words=[];starts=[];
+ const re=/\S+/g;let m;
+ while((m=re.exec(text))!==null){words.push(m[0]);starts.push([m.index,m.index+m[0].length])}
+ last=-1;render();$('mode').textContent='النص جاهز';$('status').textContent='اضغط ابدأ الاستماع لبدء المتابعة.';
+ $('coach').textContent='جاهز. اقرأ النص، ويمكنك الارتجال؛ سأحتفظ بآخر موضع مطابق.';
+ $('progress').textContent=`0 / ${words.length}`;
+}
+function render(){
+ const text=$('source').value.trim();const reader=$('reader');reader.replaceChildren();
+ if(!words.length){reader.textContent='سيظهر النص هنا بعد تجهيزه.';return}
+ let cursor=0;
+ words.forEach((w,i)=>{
+  const [a,b]=starts[i];
+  if(a>cursor)reader.append(document.createTextNode(text.slice(cursor,a)));
+  const span=document.createElement('span');span.textContent=w;
+  if(i<=last)span.className='done';else if(i===last+1)span.className='current';
+  reader.append(span);cursor=b;
+ });
+ if(cursor<text.length)reader.append(document.createTextNode(text.slice(cursor)));
+ const current=reader.querySelector('.current');if(current)current.scrollIntoView({block:'nearest',behavior:'smooth'});
+ $('progress').textContent=`${Math.max(0,last+1)} / ${words.length}`;
+}
+function bestMatch(heard){
+ const h=heard.split(/\s+/).map(norm).filter(Boolean), src=words.map(norm);
+ let best=-1,bestScore=0;
+ const lo=Math.max(0,last-6),hi=Math.min(src.length-1,last+110);
+ for(let i=lo;i<=hi;i++){
+  let score=0;
+  for(let j=0;j<h.length&&i+j<src.length;j++){
+   if(h[j]===src[i+j] || (h[j].length>3&&(src[i+j].startsWith(h[j])||h[j].startsWith(src[i+j]))))score++;
+  }
+  if(score>bestScore){bestScore=score;best=i+score-1}
+ }
+ return bestScore>=2?best:-1;
+}
+function handle(text){
+ if(!text||!words.length)return;
+ const found=bestMatch(text);
+ if(found>last){
+  last=found;render();$('mode').textContent='قراءة من النص';
+  $('coach').textContent='تمت مطابقة كلامك مع النص. إذا بدأت الارتجال سأحافظ على هذا الموضع حتى تعود إلى النص.';
+  $('status').textContent='أتابع قراءتك...';
+ }else{
+  const heard=text.split(/\s+/).map(norm).filter(Boolean);
+  const src=words.map(norm);
+  const any=heard.some(w=>w.length>2&&src.includes(w));
+  if(!any){
+   $('mode').textContent='كلام خارج النص / ارتجال محتمل';
+   $('coach').textContent=`يبدو أنك تتحدث خارج النص. آخر موضع مؤكد محفوظ عند الكلمة ${last+1}. تابع، وعندما تعود لعبارات النص سأحاول التقاط موضعك.`;
+   $('status').textContent='لم أجد تطابقاً واضحاً في هذا المقطع.';
+  }
+ }
+}
+function start(){
+ if(!words.length)prepare();
+ if(!words.length)return;
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){$('status').textContent='متصفحك لا يدعم التعرف الصوتي. جرّب Chrome المحدث.';return}
+ if(recognition){try{recognition.abort()}catch(e){}}
+ recognition=new SR();recognition.lang=$('lang').value;recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+ recognition.onstart=()=>{listening=true;$('start').disabled=true;$('stop').disabled=false;$('status').textContent='الميكروفون يعمل — اقرأ بصوت واضح.'};
+ recognition.onresult=e=>{
+  let interim='';
+  for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)handle(t);else interim+=t}
+  if(interim)handle(interim);
+ };
+ recognition.onerror=e=>{$('status').textContent='تعذر التعرف الصوتي: '+e.error};
+ recognition.onend=()=>{
+  if(listening){restartTimer=setTimeout(()=>{try{recognition.start()}catch(e){}},350)}
+  else{$('start').disabled=false;$('stop').disabled=true}
+ };
+ try{recognition.start()}catch(e){$('status').textContent='لم أتمكن من تشغيل الميكروفون. أعد المحاولة.'}
+}
+function stop(){listening=false;clearTimeout(restartTimer);if(recognition){try{recognition.stop()}catch(e){}}$('start').disabled=false;$('stop').disabled=true;$('status').textContent='تم إيقاف الاستماع.'}
+$('load').addEventListener('click',prepare);$('start').addEventListener('click',start);$('stop').addEventListener('click',stop);
+$('reset').addEventListener('click',()=>{stop();last=-1;render();$('coach').textContent='تمت إعادة موضع القراءة إلى البداية.';$('mode').textContent='جاهز للقراءة'});
+if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
+</script>
+</body>
+</html>

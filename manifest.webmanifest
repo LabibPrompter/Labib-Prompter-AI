@@ -1,0 +1,11 @@
+{
+  "name": "Labib Prompter AI",
+  "short_name": "Labib Prompter",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#101820",
+  "theme_color": "#101820",
+  "description": "قارئ ذكي لمتابعة القراءة والارتجال",
+  "lang": "ar",
+  "dir": "rtl"
+}
